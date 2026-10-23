@@ -1,71 +1,69 @@
 from logging.config import fileConfig
-
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+import os
 
 from alembic import context
+from dotenv import load_dotenv
+from sqlmodel import SQLModel, create_engine
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
+load_dotenv()
+
+# Importar aquí los modelos que se quieren migrar
+from app.src.domain.models.user import User
+from app.src.domain.models.role import Role
+from app.src.domain.models.user_credential import UserCredential
+from app.src.domain.models.user_role import UserRole
+
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+target_metadata = SQLModel.metadata
 
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
+# Todos los microservicios usan la misma base de datos.
+# Por eso cada uno:
+#   - solo revisa las tablas que empiezan con su prefijo
+#     (si no, el autogenerate propondría borrar las tablas de los demás);
+#   - guarda su versión en su propia tabla de Alembic.
+TABLE_PREFIX = "usr_"
+# user-service conserva la tabla por defecto porque su primera migración
+# ya pudo aplicarse con ese nombre.
+VERSION_TABLE = "alembic_version"
+
+DATABASE_URL = os.getenv("DATABASE_URL", "").replace(
+    "postgresql://", "postgresql+psycopg://"
+)
 
 
-def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode.
+def include_name(name, type_, parent_names):
+    if type_ == "table":
+        return name.startswith(TABLE_PREFIX)
+    return True
 
-    This configures the context with just a URL
-    and not an Engine, though an Engine is acceptable
-    here as well.  By skipping the Engine creation
-    we don't even need a DBAPI to be available.
 
-    Calls to context.execute() here emit the given string to the
-    script output.
-
-    """
-    url = config.get_main_option("sqlalchemy.url")
+def run_migrations_offline():
     context.configure(
-        url=url,
+        url=DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        version_table=VERSION_TABLE,
+        include_name=include_name,
     )
 
     with context.begin_transaction():
         context.run_migrations()
 
 
-def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
+def run_migrations_online():
+    engine = create_engine(DATABASE_URL)
 
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-
-    with connectable.connect() as connection:
+    with engine.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            version_table=VERSION_TABLE,
+            include_name=include_name,
         )
 
         with context.begin_transaction():
